@@ -312,7 +312,7 @@ def _send_vllm(
 def _run_server(args: argparse.Namespace) -> None:
     is_vllm = args.backend == "vllm"
     dataset = load_and_process_dataset(args.dataset)
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
 
     num_prompts = args.num_prompts + args.concurrency
     prompts: list[str] = []
