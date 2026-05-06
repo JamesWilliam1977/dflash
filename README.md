@@ -107,14 +107,13 @@ print(tokenizer.decode(output[0], skip_special_tokens=False))
 
 ### MLX (Apple Silicon)
 
-There have been many great community DFlash implementations on MLX; we provide a simple and efficient one here, tested on an Apple M5 Pro with Qwen3 and Qwen3.5 models.
+There have been many great community DFlash implementations on MLX; we provide a simple and efficient one here, tested on an Apple M5 Pro with Qwen3, Qwen3.5 and Gemma-4 models.
 
 ```python
 from dflash.model_mlx import load, load_draft, stream_generate
 
 model, tokenizer = load("Qwen/Qwen3.5-4B")
-# Experimental: bound the committed draft KV history to a sliding window.
-draft = load_draft("z-lab/Qwen3.5-4B-DFlash", sliding_window_size=None)
+draft = load_draft("z-lab/Qwen3.5-4B-DFlash")
 
 messages = [{"role": "user", "content": "How many positive whole-number divisors does 196 have?"}]
 prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=True)
@@ -124,10 +123,6 @@ for r in stream_generate(model, draft, tokenizer, prompt, block_size=16, max_tok
     tps = r.generation_tps
 print(f"\nThroughput: {tps:.2f} tok/s")
 ```
-
-For ultra-long-context or agentic use cases, consider trying the experimental
-`sliding_window_size` / `--draft-sliding-window-size` option to bound draft KV
-growth.
 
 ## 📊 Evaluation
 
@@ -157,9 +152,8 @@ torchrun --nproc_per_node=8 -m dflash.benchmark --backend transformers \
 **MLX**:
 ```bash
 python -m dflash.benchmark --backend mlx \
-    --model Qwen/Qwen3.5-4B --draft-model z-lab/Qwen3.5-4B-DFlash \
-    --dataset gsm8k --max-samples 128 --enable-thinking \
-    --draft-sliding-window-size 4096
+    --model mlx-community/gemma-4-31b-it-4bit --draft-model z-lab/gemma-4-31B-it-DFlash \
+    --dataset gsm8k --max-samples 128 --enable-thinking
 ```
 
 ## Acknowledgement
