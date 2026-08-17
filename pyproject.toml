@@ -4,13 +4,9 @@ version = "0.1.0"
 description = "DFlash: Block Diffusion for Flash Speculative Decoding"
 requires-python = ">=3.10"
 dependencies = [
-    "rich",
-    "loguru",
-    "numpy",
-    "tqdm",
-    "datasets",
-    "requests",
-    "huggingface-hub",
+    "tqdm==4.70.0",
+    "datasets==5.0.1",
+    "requests==2.34.2",
 ]
 
 [tool.setuptools.packages.find]
@@ -18,21 +14,11 @@ include = ["dflash*"]
 
 [project.optional-dependencies]
 transformers = [
-    "torch",
-    "transformers==4.57.1",
-    "accelerate",
-    "typing-extensions",
-]
-sglang = [
-    "sglang[all] @ git+https://github.com/sgl-project/sglang.git@refs/pull/23000/head#subdirectory=python",
-    "transformers",
-]
-vllm = [
-    "vllm",
-    "datasets>=3,<4",
-    "huggingface-hub<1",
+    "torch==2.13.0",
+    "transformers==5.15.0",
 ]
 mlx = [
-    "mlx==0.31.2",
+    "mlx==0.32.0",
     "mlx-lm==0.31.3",
+    "huggingface-hub==1.27.0",
 ]
