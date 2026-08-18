@@ -475,6 +475,10 @@ def load_draft(draft_id: str) -> DFlashDraftModel:
         if "DFlash2DraftModel" in (cfg.get("architectures") or [])
         else DFlashDraftModel
     )
+    if model_class is DFlash2DraftModel:
+        for name in ("predecessor_codebook", "successor_codebook"):
+            key = f"candidate_selector.{name}"
+            weights[f"{key}.weight"] = weights.pop(key)
     model = model_class(config)
     model.eval()
     model.load_weights(list(weights.items()))

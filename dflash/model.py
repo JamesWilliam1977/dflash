@@ -7,6 +7,8 @@ from torch import nn
 from torch.nn import functional as F
 from transformers import DynamicCache
 from transformers.cache_utils import Cache
+from transformers.conversion_mapping import register_checkpoint_conversion_mapping
+from transformers.core_model_loading import WeightRenaming
 from transformers.models.qwen3.modeling_qwen3 import (
     ALL_ATTENTION_FUNCTIONS,
     GradientCheckpointingLayer,
@@ -649,3 +651,15 @@ class DFlash2DraftModel(DFlashDraftModel):
             anchor_ids,
             temperature,
         )
+
+
+register_checkpoint_conversion_mapping(
+    "DFlash2DraftModel",
+    [
+        WeightRenaming(
+            f"candidate_selector.{name}",
+            f"candidate_selector.{name}.weight",
+        )
+        for name in ("predecessor_codebook", "successor_codebook")
+    ],
+)
