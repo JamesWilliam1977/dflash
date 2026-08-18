@@ -1,16 +1,19 @@
 # DFlash: Block Diffusion for Flash Speculative Decoding
-[**Paper**](https://arxiv.org/abs/2602.06036) | [**Blog**](https://z-lab.ai/projects/dflash/) | [**Models**](https://huggingface.co/z-lab/models?search=DFlash)
 
 **DFlash** is a lightweight **block diffusion** model designed for speculative decoding. It enables efficient and high-quality parallel drafting.
 
 <details open>
-<summary><strong>DFlash2 architecture</strong></summary>
+<summary><strong>DFlash 2</strong></summary>
 
-<p align="center"><img src="https://raw.githubusercontent.com/jianc99/jianc99.github.io/master/images/dflash2_system.png" alt="DFlash2 architecture"></p>
+[**Blog**](https://inco.ai/blog/dflash2/) | [**Models**](https://huggingface.co/collections/z-lab/dflash-2)
+
+<p align="center"><img src="https://raw.githubusercontent.com/jianc99/jianc99.github.io/master/images/dflash2_system.png" alt="DFlash 2 architecture"></p>
 </details>
 
 <details>
-<summary><strong>DFlash architecture</strong></summary>
+<summary><strong>DFlash</strong></summary>
+
+[**Paper**](https://arxiv.org/abs/2602.06036) | [**Blog**](https://z-lab.ai/projects/dflash/) | [**Models**](https://huggingface.co/collections/z-lab/dflash)
 
 ![DFlash architecture](https://raw.githubusercontent.com/jianc99/jianc99.github.io/master/images/dflash_system.png)
 
@@ -19,9 +22,9 @@ https://github.com/user-attachments/assets/5b29cabb-eb95-44c9-8ffe-367c0758de8c
 
 ## Supported Models
 
-### DFlash2
+### DFlash 2
 
-Available checkpoints: [Muse-Glimmer-30B](https://huggingface.co/z-lab/Muse-Glimmer-30B-DFlash2) and [Qwen3.8-27B](https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2). See the [DFlash2 collection](https://huggingface.co/collections/z-lab/dflash2-6a82bfe5f57644038bc8714a) for updates.
+Available checkpoints: [Muse-Glimmer-30B](https://huggingface.co/z-lab/Muse-Glimmer-30B-DFlash2) and [Qwen3.8-27B](https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2). See the [DFlash 2 collection](https://huggingface.co/collections/z-lab/dflash-2) for updates.
 
 ### DFlash
 
@@ -46,13 +49,13 @@ pip install dflash
 pip install "dflash[local]"  # local inference
 ```
 
-For serving benchmarks, install the latest [SGLang](https://github.com/sgl-project/sglang) or [vLLM](https://github.com/vllm-project/vllm) separately, launch an OpenAI-compatible server with DFlash, and pass its `--base-url` below.
+For serving benchmarks, install a supported version of [SGLang](https://github.com/sgl-project/sglang), [vLLM](https://github.com/vllm-project/vllm), [MLX](https://github.com/ml-explore/mlx-lm), or [llama.cpp](https://github.com/ggml-org/llama.cpp) separately, launch its OpenAI-compatible server with DFlash, and pass its `--base-url` below.
 
 ## 🚀 Quick Start
 
 ### Transformers
 
-The Transformers backend supports DFlash2 for Muse-Glimmer-30B, and DFlash for
+The Transformers backend supports DFlash 2 for Muse-Glimmer-30B, and DFlash for
 Qwen3 and LLaMA-3.1-8B. Muse uses `reasoning_strength`: `low`, `medium`, `high`
 (default), or `xhigh`.
 
@@ -66,7 +69,7 @@ dflash generate transformers \
 
 ### MLX (Apple Silicon)
 
-The MLX backend supports DFlash2 for Qwen3.8-27B, and DFlash for Qwen3,
+The MLX backend supports DFlash 2 for Qwen3.8-27B, and DFlash for Qwen3,
 Qwen3.5, Qwen3.6, and Gemma 4. Qwen3.8 uses `reasoning_effort`: `low`, `medium`,
 or `xhigh` (default). For quantized targets or drafts, use `block_size <= 5`: MLX's current
 quantized matmul kernel becomes less efficient at larger verify widths.
@@ -102,14 +105,14 @@ dflash benchmark openai \
     --temperature 1 --top-p 0.95 --top-k 20
 ```
 
-**Transformers** (Muse-Glimmer-30B DFlash2):
+**Transformers** (Muse-Glimmer-30B DFlash 2):
 ```bash
 dflash benchmark transformers \
     --model meta-models/Muse-Glimmer-30B --draft z-lab/Muse-Glimmer-30B-DFlash2 \
     --dataset gsm8k --max-samples 128 --reasoning high
 ```
 
-**MLX** (Qwen3.8-27B 4-bit DFlash2):
+**MLX** (Qwen3.8-27B 4-bit DFlash 2):
 ```bash
 dflash benchmark mlx \
     --model mlx-community/Qwen3.8-27B-4bit --draft z-lab/Qwen3.8-27B-DFlash2 \
