@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import os
 import random
 import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import chain
 from types import SimpleNamespace
-from typing import Any
 
 import requests
 from tqdm import tqdm
@@ -218,54 +216,13 @@ def _print_decode_summary(responses: list[dict[int, SimpleNamespace]], block_siz
     print(f"Acceptance length histogram: {[f'{x * 100:.1f}%' for x in histogram]}")
 
 
-def _env_int(name: str, default: int) -> int:
-    return int(os.environ.get(name, default))
-
-
-def _dist_init(torch_dist) -> None:
-    if "RANK" not in os.environ:
-        return
-    torch_dist.init_process_group(backend="nccl", init_method="env://")
-
-
-def _dist_size() -> int:
-    return _env_int("WORLD_SIZE", 1)
-
-
-def _dist_rank() -> int:
-    return _env_int("RANK", 0)
-
-
-def _dist_local_rank() -> int:
-    return _env_int("LOCAL_RANK", 0)
-
-
-def _dist_is_main() -> bool:
-    return _dist_rank() == 0
-
-
-def _dist_gather(torch_dist, obj: Any, dst: int = 0):
-    if not torch_dist.is_initialized():
-        return [obj]
-    if _dist_is_main():
-        objs = [None] * _dist_size()
-        torch_dist.gather_object(obj, objs, dst=dst)
-        return objs
-    torch_dist.gather_object(obj, dst=dst)
-    return None
-
-
 def _run_transformers(args: argparse.Namespace) -> None:
     import torch
-    from torch import distributed as torch_dist
 
     from .model import dflash_generate
 
     torch.manual_seed(0)
-
-    _dist_init(torch_dist)
-    torch.cuda.set_device(_dist_local_rank())
-    device = torch.device(f"cuda:{_dist_local_rank()}")
+    device = torch.device("cuda:0")
     target, draft_model, tokenizer = load_transformers_models(
         args.model, args.draft, device
     )
@@ -289,8 +246,7 @@ def _run_transformers(args: argparse.Namespace) -> None:
         )
 
     responses = []
-    indices = range(_dist_rank(), len(dataset), _dist_size())
-    for idx in tqdm(indices, disable=not _dist_is_main()):
+    for idx in tqdm(range(len(dataset))):
         instance = dataset[idx]
         messages = []
         for user_content in instance["turns"]:
@@ -320,12 +276,6 @@ def _run_transformers(args: argparse.Namespace) -> None:
             output_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
             messages.append({"role": "assistant", "content": output_text})
             responses.append(response)
-
-    if _dist_size() > 1:
-        responses = _dist_gather(torch_dist, responses, dst=0)
-        if not _dist_is_main():
-            return
-        responses = list(chain(*responses))
 
     _print_decode_summary(responses, block_size)
 

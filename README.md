@@ -104,7 +104,7 @@ dflash benchmark openai \
 
 **Transformers** (Muse-Glimmer-30B DFlash2):
 ```bash
-torchrun --nproc_per_node=8 --module dflash.cli benchmark transformers \
+dflash benchmark transformers \
     --model meta-models/Muse-Glimmer-30B --draft z-lab/Muse-Glimmer-30B-DFlash2 \
     --dataset gsm8k --max-samples 128 --reasoning high
 ```
