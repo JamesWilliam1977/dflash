@@ -7,8 +7,6 @@ from torch import nn
 from torch.nn import functional as F
 from transformers import DynamicCache
 from transformers.cache_utils import Cache
-from transformers.conversion_mapping import register_checkpoint_conversion_mapping
-from transformers.core_model_loading import WeightRenaming
 from transformers.models.qwen3.modeling_qwen3 import (
     ALL_ATTENTION_FUNCTIONS,
     GradientCheckpointingLayer,
@@ -630,6 +628,14 @@ class DFlashDraftModel(Qwen3PreTrainedModel):
 
 
 class DFlash2DraftModel(DFlashDraftModel):
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        kwargs.setdefault("key_mapping", {
+            f"candidate_selector.{name}": f"candidate_selector.{name}.weight"
+            for name in ("predecessor_codebook", "successor_codebook")
+        })
+        return super().from_pretrained(*args, **kwargs)
+
     def __init__(self, config) -> None:
         super().__init__(config)
         kernel_size = int(_draft_value(config, "conv_kernel_size"))
@@ -651,15 +657,3 @@ class DFlash2DraftModel(DFlashDraftModel):
             anchor_ids,
             temperature,
         )
-
-
-register_checkpoint_conversion_mapping(
-    "DFlash2DraftModel",
-    [
-        WeightRenaming(
-            f"candidate_selector.{name}",
-            f"candidate_selector.{name}.weight",
-        )
-        for name in ("predecessor_codebook", "successor_codebook")
-    ],
-)
