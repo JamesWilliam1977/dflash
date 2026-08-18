@@ -8,6 +8,8 @@
 [**Blog**](https://inco.ai/blog/dflash2/) | [**Models**](https://huggingface.co/collections/z-lab/dflash-2)
 
 <p align="center"><img src="https://raw.githubusercontent.com/jianc99/jianc99.github.io/master/images/dflash2_system.png" alt="DFlash 2 architecture"></p>
+
+https://github.com/user-attachments/assets/f786e7c5-c2bc-47d4-8a32-1f730a689e1b
 </details>
 
 <details>
