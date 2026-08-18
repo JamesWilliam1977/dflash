@@ -43,6 +43,125 @@ DATASETS = {
 }
 
 
+def _reasoning_kwargs(reasoning: str | None, template: str | None = None) -> dict:
+    if reasoning is None:
+        return {}
+    if reasoning in {"on", "off"}:
+        if template is not None and "enable_thinking" not in template:
+            raise ValueError("This model does not support --reasoning on/off")
+        return {"enable_thinking": reasoning == "on"}
+    if template is not None:
+        for key in ("reasoning_strength", "reasoning_effort"):
+            if key in template:
+                return {key: reasoning}
+        raise ValueError("This model supports only --reasoning on/off")
+    return {
+        "enable_thinking": True,
+        "reasoning_effort": reasoning,
+        "reasoning_strength": reasoning,
+    }
+
+
+def apply_chat_template(
+    tokenizer,
+    messages: list[dict],
+    reasoning: str | None,
+) -> str:
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        **_reasoning_kwargs(reasoning, str(tokenizer.chat_template or "")),
+    )
+
+
+def load_transformers_models(model_id: str, draft_id: str, device):
+    import torch
+    from transformers import (
+        AutoConfig,
+        AutoModelForCausalLM,
+        AutoModelForImageTextToText,
+        AutoTokenizer,
+    )
+
+    from .model import DFlash2DraftModel, DFlashDraftModel
+
+    target_kwargs = {"attn_implementation": "sdpa", "dtype": torch.bfloat16}
+    try:
+        target = AutoModelForCausalLM.from_pretrained(model_id, **target_kwargs)
+    except ValueError:
+        target = AutoModelForImageTextToText.from_pretrained(model_id, **target_kwargs)
+    target = target.to(device).eval()
+
+    config = AutoConfig.from_pretrained(draft_id)
+    draft_class = (
+        DFlash2DraftModel
+        if "DFlash2DraftModel" in (config.architectures or [])
+        else DFlashDraftModel
+    )
+    draft = (
+        draft_class.from_pretrained(
+            draft_id,
+            attn_implementation="sdpa",
+            dtype=torch.bfloat16,
+        )
+        .to(device)
+        .eval()
+    )
+    return target, draft, AutoTokenizer.from_pretrained(model_id)
+
+
+def load_mlx_models(model_id: str, draft_id: str, draft_bits: int | None):
+    import mlx.core as mx
+    import mlx.nn as nn
+
+    from .model_mlx import load, load_draft
+
+    model, tokenizer = load(model_id)
+    draft = load_draft(draft_id)
+    if draft_bits is not None:
+        nn.quantize(draft, group_size=64, bits=draft_bits)
+        mx.eval(draft.parameters())
+    return model, draft, tokenizer
+
+
+def stop_token_ids(model, tokenizer) -> list[int]:
+    token_ids = model.generation_config.eos_token_id or tokenizer.eos_token_id
+    return [token_ids] if isinstance(token_ids, int) else list(token_ids)
+
+
+def send_openai(
+    base_url: str,
+    messages: list[dict],
+    *,
+    model: str,
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    timeout_s: int,
+    reasoning: str | None = None,
+) -> dict:
+    body: dict = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_new_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
+        "chat_template_kwargs": _reasoning_kwargs(reasoning),
+        "return_meta_info": True,
+    }
+    if top_k > 0:
+        body["top_k"] = top_k
+    response = requests.post(
+        base_url.rstrip("/") + "/v1/chat/completions",
+        json=body,
+        timeout=timeout_s,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def load_and_process_dataset(data_name: str) -> list[dict]:
     from datasets import load_dataset
 
@@ -66,24 +185,6 @@ def _select_dataset(
     if not repeat:
         count = min(count, len(order))
     return [dataset[order[i % len(order)]] for i in range(count)]
-
-
-def _reasoning_kwargs(enable_thinking: bool, reasoning_level: str | None) -> dict:
-    kwargs = {"enable_thinking": enable_thinking}
-    if reasoning_level is not None:
-        kwargs.update(reasoning_effort=reasoning_level, reasoning_strength=reasoning_level)
-    return kwargs
-
-
-def _apply_chat_template(
-    tokenizer, messages: list[dict], enable_thinking: bool, reasoning_level: str | None,
-) -> str:
-    return tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-        **_reasoning_kwargs(enable_thinking, reasoning_level),
-    )
 
 
 def _make_decode_metrics(num_output_tokens: int, generation_tps: float, acceptance_lengths: list[int]) -> SimpleNamespace:
@@ -157,45 +258,27 @@ def _dist_gather(torch_dist, obj: Any, dst: int = 0):
 def _run_transformers(args: argparse.Namespace) -> None:
     import torch
     from torch import distributed as torch_dist
-    from transformers import (
-        AutoConfig,
-        AutoModelForCausalLM,
-        AutoModelForImageTextToText,
-        AutoTokenizer,
-    )
 
-    from .model import DFlash2DraftModel, DFlashDraftModel, dflash_generate
+    from .model import dflash_generate
 
     torch.manual_seed(0)
 
     _dist_init(torch_dist)
     torch.cuda.set_device(_dist_local_rank())
     device = torch.device(f"cuda:{_dist_local_rank()}")
-    target_kwargs = {"attn_implementation": "sdpa", "dtype": torch.bfloat16}
-    try:
-        target = AutoModelForCausalLM.from_pretrained(args.model, **target_kwargs)
-    except ValueError:
-        target = AutoModelForImageTextToText.from_pretrained(args.model, **target_kwargs)
-    target = target.to(device).eval()
-
-    draft_config = AutoConfig.from_pretrained(args.draft_model)
-    architectures = draft_config.architectures or []
-    draft_class = DFlash2DraftModel if "DFlash2DraftModel" in architectures else DFlashDraftModel
-    draft_model = draft_class.from_pretrained(
-        args.draft_model, attn_implementation="sdpa", dtype=torch.bfloat16,
-    ).to(device).eval()
+    target, draft_model, tokenizer = load_transformers_models(
+        args.model, args.draft, device
+    )
 
     block_size = args.block_size if args.block_size is not None else draft_model.block_size
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
     dataset = load_and_process_dataset(args.dataset)
 
     dataset = _select_dataset(dataset, args.max_samples)
 
-    warmup_text = _apply_chat_template(
+    warmup_text = apply_chat_template(
         tokenizer,
         [{"role": "user", "content": dataset[0]["turns"][0]}],
-        args.enable_thinking,
-        args.reasoning_level,
+        args.reasoning,
     )
     warmup = tokenizer.encode(warmup_text, return_tensors="pt").to(device)
     warmup_tokens = min(64, args.max_new_tokens)
@@ -212,8 +295,8 @@ def _run_transformers(args: argparse.Namespace) -> None:
         messages = []
         for user_content in instance["turns"]:
             messages.append({"role": "user", "content": user_content})
-            input_text = _apply_chat_template(
-                tokenizer, messages, args.enable_thinking, args.reasoning_level,
+            input_text = apply_chat_template(
+                tokenizer, messages, args.reasoning,
             )
             input_ids = tokenizer.encode(input_text, return_tensors="pt").to(target.device)
 
@@ -224,7 +307,7 @@ def _run_transformers(args: argparse.Namespace) -> None:
                     target=target,
                     input_ids=input_ids,
                     max_new_tokens=args.max_new_tokens,
-                    stop_token_ids=[tokenizer.eos_token_id],
+                    stop_token_ids=stop_token_ids(target, tokenizer),
                     temperature=args.temperature,
                     top_p=args.top_p,
                     top_k=args.top_k,
@@ -247,56 +330,20 @@ def _run_transformers(args: argparse.Namespace) -> None:
     _print_decode_summary(responses, block_size)
 
 
-def _send_openai(
-    base_url: str,
-    messages: list[dict],
-    *,
-    model: str,
-    max_new_tokens: int,
-    temperature: float,
-    top_p: float,
-    top_k: int,
-    timeout_s: int,
-    enable_thinking: bool = False,
-    reasoning_level: str | None = None,
-) -> dict:
-    body: dict = {
-        "model": model,
-        "messages": messages,
-        "max_tokens": max_new_tokens,
-        "temperature": temperature,
-        "top_p": top_p,
-        "chat_template_kwargs": _reasoning_kwargs(enable_thinking, reasoning_level),
-        "return_meta_info": True,
-    }
-    if top_k > 0:
-        body["top_k"] = top_k
-    resp = requests.post(
-        base_url + "/v1/chat/completions",
-        json=body,
-        timeout=timeout_s,
-    )
-    resp.raise_for_status()
-    return resp.json()
-
-
 def _run_mlx(args: argparse.Namespace) -> None:
     import mlx.core as mx
-    import mlx.nn as nn
     from mlx_lm import stream_generate as stream_generate_baseline
 
-    from .model_mlx import load, load_draft, make_sampler, stream_generate
+    from .model_mlx import make_sampler, stream_generate
 
     mx.random.seed(0)
     sampler = make_sampler(args.temperature, args.top_p, args.top_k)
 
     print(f"Loading target: {args.model}")
-    model, tokenizer = load(args.model)
-    print(f"Loading draft: {args.draft_model}")
-    draft = load_draft(args.draft_model)
-    if args.draft_bits is not None:
-        nn.quantize(draft, group_size=64, bits=args.draft_bits)
-        mx.eval(draft.parameters())
+    print(f"Loading draft: {args.draft}")
+    model, draft, tokenizer = load_mlx_models(
+        args.model, args.draft, args.draft_bits
+    )
     block_size = args.block_size if args.block_size is not None else int(draft.config.block_size)
 
     dataset = load_and_process_dataset(args.dataset)
@@ -319,8 +366,8 @@ def _run_mlx(args: argparse.Namespace) -> None:
         messages = []
         for user_content in instance["turns"]:
             messages.append({"role": "user", "content": user_content})
-            prompt = _apply_chat_template(
-                tokenizer, messages, args.enable_thinking, args.reasoning_level,
+            prompt = apply_chat_template(
+                tokenizer, messages, args.reasoning,
             )
 
             response = {}
@@ -368,7 +415,7 @@ def _run_openai(args: argparse.Namespace) -> None:
     ]
 
     def send_one(messages: list[dict], max_new_tokens=args.max_new_tokens) -> dict:
-        return _send_openai(
+        return send_openai(
             args.base_url,
             messages,
             model=args.model,
@@ -377,8 +424,7 @@ def _run_openai(args: argparse.Namespace) -> None:
             top_p=args.top_p,
             top_k=args.top_k,
             timeout_s=args.timeout_s,
-            enable_thinking=args.enable_thinking,
-            reasoning_level=args.reasoning_level,
+            reasoning=args.reasoning,
         )
 
     print(f"[warmup] {bs} requests ...")
@@ -423,48 +469,10 @@ def _run_openai(args: argparse.Namespace) -> None:
     print(f"{'=' * 50}")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="DFlash benchmark")
-    parser.add_argument("--backend", choices=["transformers", "openai", "mlx"], required=True)
-    parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--dataset", type=str, required=True)
-    parser.add_argument("--max-new-tokens", type=int, default=2048)
-    parser.add_argument("--temperature", type=float, default=0.0)
-
-    parser.add_argument("--draft-model", type=str, default=None)
-    parser.add_argument("--draft-bits", type=int, choices=[4, 8], default=None)
-    parser.add_argument("--block-size", type=int, default=None)
-    parser.add_argument("--max-samples", type=int, default=None)
-
-    parser.add_argument("--base-url", type=str, default="http://127.0.0.1:30000")
-    parser.add_argument("--num-prompts", type=int, default=1024)
-    parser.add_argument("--concurrency", type=int, default=1)
-    parser.add_argument("--top-p", type=float, default=1.0)
-    parser.add_argument("--top-k", type=int, default=0)
-    parser.add_argument("--enable-thinking", action="store_true")
-    parser.add_argument(
-        "--reasoning-level",
-        type=str,
-        default=None,
-        help="Muse: low/medium/high/xhigh; Qwen3.8: low/medium/xhigh",
-    )
-    parser.add_argument("--timeout-s", type=int, default=3600)
-
-    args = parser.parse_args()
-    if args.reasoning_level is not None:
-        args.enable_thinking = True
-
+def run(args: argparse.Namespace) -> None:
     if args.backend == "transformers":
-        if args.draft_model is None:
-            parser.error("--draft-model is required for transformers backend")
         _run_transformers(args)
     elif args.backend == "mlx":
-        if args.draft_model is None:
-            parser.error("--draft-model is required for mlx backend")
         _run_mlx(args)
     else:
         _run_openai(args)
-
-
-if __name__ == "__main__":
-    main()

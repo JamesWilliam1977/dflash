@@ -37,14 +37,16 @@ Use the Transformers or MLX backends below for their explicitly listed model fam
 
 ## 📦 Installation
 
-Use a separate virtual environment for each to avoid conflict.
+Install the base package for an OpenAI-compatible server, or include local
+inference dependencies. The local install uses MLX on Apple Silicon and
+Transformers on Linux.
 
-| Backend | Install command |
-|---|---|
-| **Transformers** | `uv pip install -e ".[transformers]"` |
-| **MLX** (Apple Silicon) | `pip install -e ".[mlx]"` |
+```bash
+pip install dflash
+pip install "dflash[local]"  # local inference
+```
 
-For serving benchmarks, install the latest [SGLang](https://github.com/sgl-project/sglang) or [vLLM](https://github.com/vllm-project/vllm) separately, launch an OpenAI-compatible server with DFlash, and use the `openai` backend below.
+For serving benchmarks, install the latest [SGLang](https://github.com/sgl-project/sglang) or [vLLM](https://github.com/vllm-project/vllm) separately, launch an OpenAI-compatible server with DFlash, and pass its `--base-url` below.
 
 ## 🚀 Quick Start
 
@@ -54,22 +56,12 @@ The Transformers backend supports DFlash2 for Muse-Glimmer-30B, and DFlash for
 Qwen3 and LLaMA-3.1-8B. Muse uses `reasoning_strength`: `low`, `medium`, `high`
 (default), or `xhigh`.
 
-```python
-from dflash.model import DFlash2DraftModel
-from transformers import AutoModelForImageTextToText, AutoTokenizer
-
-target = AutoModelForImageTextToText.from_pretrained("meta-models/Muse-Glimmer-30B").cuda().eval()
-draft = DFlash2DraftModel.from_pretrained("z-lab/Muse-Glimmer-30B-DFlash2").cuda().eval()
-tokenizer = AutoTokenizer.from_pretrained("meta-models/Muse-Glimmer-30B")
-
-messages = [{"role": "user", "content": "How many positive whole-number divisors does 196 have?"}]
-prompt = tokenizer.apply_chat_template(
-    messages, tokenize=False, add_generation_prompt=True, reasoning_strength="high"
-)
-input_ids = tokenizer.encode(prompt, return_tensors="pt").to(draft.device)
-
-output = draft.spec_generate(input_ids=input_ids, max_new_tokens=2048, temperature=0.0, target=target, stop_token_ids=[tokenizer.eos_token_id])
-print(tokenizer.decode(output[0], skip_special_tokens=False))
+```bash
+dflash generate transformers \
+    --model meta-models/Muse-Glimmer-30B \
+    --draft z-lab/Muse-Glimmer-30B-DFlash2 \
+    --reasoning high --temperature 1 --top-p 0.95 --top-k 64 \
+    "How many positive whole-number divisors does 196 have?"
 ```
 
 ### MLX (Apple Silicon)
@@ -80,33 +72,23 @@ or `xhigh` (default). For quantized targets or drafts, use `block_size <= 5`: ML
 quantized matmul kernel becomes less efficient at larger verify widths.
 The example below runs both the target and draft with 4-bit weights.
 
-```python
-import mlx.core as mx
-import mlx.nn as nn
-from dflash.model_mlx import load, load_draft, stream_generate
-
-model, tokenizer = load("mlx-community/Qwen3.8-27B-4bit")
-draft = load_draft("z-lab/Qwen3.8-27B-DFlash2")
-nn.quantize(draft, group_size=64, bits=4)
-mx.eval(draft.parameters())
-
-messages = [{"role": "user", "content": "How many positive whole-number divisors does 196 have?"}]
-prompt = tokenizer.apply_chat_template(
-    messages, tokenize=False, add_generation_prompt=True,
-    enable_thinking=True, reasoning_effort="xhigh",
-)
-tps = 0.0
-for r in stream_generate(
-    model, draft, tokenizer, prompt, block_size=5, max_tokens=2048,
-    temperature=1.0, top_p=0.95, top_k=20,
-):
-    print(r.text, end="", flush=True)
-    tps = r.generation_tps
-print(f"\nThroughput: {tps:.2f} tok/s")
+```bash
+dflash generate mlx \
+    --model mlx-community/Qwen3.8-27B-4bit \
+    --draft z-lab/Qwen3.8-27B-DFlash2 \
+    --draft-bits 4 --block-size 5 --reasoning xhigh \
+    "How many positive whole-number divisors does 196 have?"
 ```
 
-Both local backends use exact rejection sampling for sampled decoding and support
-`temperature`, `top_p`, and `top_k`.
+### OpenAI-compatible server
+
+Launch the latest SGLang or vLLM server separately, then run:
+
+```bash
+dflash generate openai \
+    --base-url http://127.0.0.1:8000 --model Qwen/Qwen3.8-27B \
+    "How many positive whole-number divisors does 196 have?"
+```
 
 ## 📊 Evaluation
 
@@ -114,23 +96,24 @@ All benchmarks share the same datasets (gsm8k, math500, humaneval, mbpp, mt-benc
 
 **OpenAI-compatible server** (SGLang or vLLM):
 ```bash
-python -m dflash.benchmark --backend openai \
-    --base-url http://127.0.0.1:8000 --model Qwen/Qwen3.5-27B \
-    --dataset gsm8k --num-prompts 128 --concurrency 1 --enable-thinking
+dflash benchmark openai \
+    --base-url http://127.0.0.1:8000 --model Qwen/Qwen3.8-27B \
+    --dataset gsm8k --num-prompts 128 --concurrency 1 --reasoning xhigh \
+    --temperature 1 --top-p 0.95 --top-k 20
 ```
 
 **Transformers** (Muse-Glimmer-30B DFlash2):
 ```bash
-torchrun --nproc_per_node=8 -m dflash.benchmark --backend transformers \
-    --model meta-models/Muse-Glimmer-30B --draft-model z-lab/Muse-Glimmer-30B-DFlash2 \
-    --dataset gsm8k --max-samples 128 --reasoning-level high
+torchrun --nproc_per_node=8 --module dflash.cli benchmark transformers \
+    --model meta-models/Muse-Glimmer-30B --draft z-lab/Muse-Glimmer-30B-DFlash2 \
+    --dataset gsm8k --max-samples 128 --reasoning high
 ```
 
 **MLX** (Qwen3.8-27B 4-bit DFlash2):
 ```bash
-python -m dflash.benchmark --backend mlx \
-    --model mlx-community/Qwen3.8-27B-4bit --draft-model z-lab/Qwen3.8-27B-DFlash2 \
-    --dataset gsm8k --max-samples 128 --reasoning-level xhigh --block-size 5 --draft-bits 4
+dflash benchmark mlx \
+    --model mlx-community/Qwen3.8-27B-4bit --draft z-lab/Qwen3.8-27B-DFlash2 \
+    --dataset gsm8k --max-samples 128 --reasoning xhigh --block-size 5 --draft-bits 4
 ```
 
 ## Acknowledgement
