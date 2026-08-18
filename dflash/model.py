@@ -1,5 +1,6 @@
 import time
 from types import SimpleNamespace
+from typing import ClassVar
 
 import torch
 from torch import nn
@@ -150,8 +151,7 @@ def _make_cache(config):
 
 def _crop_to(cache, length):
     remove = cache.get_seq_length() - length
-    if remove > 0:
-        cache.crop(-remove)
+    cache.crop(-remove)
 
 
 def _attention_mask(query, key, *, is_causal, sliding_window):
@@ -217,6 +217,7 @@ def dflash_generate(
     )
     if block_size > 1:
         target_hidden = extract_context_feature(output.hidden_states, model.target_layer_ids)
+    _crop_to(past_key_values_target, num_input_tokens)
     time_to_first_token = _cuda_time() - prefill_start if return_stats else None
 
     decode_start = _cuda_time() if return_stats else None
@@ -548,7 +549,7 @@ class CandidateSelector(nn.Module):
 
 class DFlashDraftModel(Qwen3PreTrainedModel):
     config_class = Qwen3Config
-    _no_split_modules = ["Qwen3DFlashDecoderLayer"]
+    _no_split_modules: ClassVar[list[str]] = ["Qwen3DFlashDecoderLayer"]
 
     def __init__(self, config) -> None:
         super().__init__(config)

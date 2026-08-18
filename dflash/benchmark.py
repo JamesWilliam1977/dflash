@@ -111,7 +111,7 @@ def load_transformers_models(model_id: str, draft_id: str, device):
 
 def load_mlx_models(model_id: str, draft_id: str, draft_bits: int | None):
     import mlx.core as mx
-    import mlx.nn as nn
+    from mlx import nn
 
     from .model_mlx import load, load_draft
 
@@ -237,7 +237,9 @@ def _run_transformers(args: argparse.Namespace) -> None:
         [{"role": "user", "content": dataset[0]["turns"][0]}],
         args.reasoning,
     )
-    warmup = tokenizer.encode(warmup_text, return_tensors="pt").to(device)
+    warmup = tokenizer.encode(
+        warmup_text, return_tensors="pt", add_special_tokens=False
+    ).to(device)
     warmup_tokens = min(64, args.max_new_tokens)
     for bs in (1, block_size):
         dflash_generate(
@@ -254,7 +256,9 @@ def _run_transformers(args: argparse.Namespace) -> None:
             input_text = apply_chat_template(
                 tokenizer, messages, args.reasoning,
             )
-            input_ids = tokenizer.encode(input_text, return_tensors="pt").to(target.device)
+            input_ids = tokenizer.encode(
+                input_text, return_tensors="pt", add_special_tokens=False
+            ).to(target.device)
 
             response = {}
             for bs in [1, block_size]:
