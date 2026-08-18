@@ -51,7 +51,7 @@ pip install dflash
 pip install "dflash[local]"  # local inference
 ```
 
-For serving benchmarks, install a supported version of [SGLang](https://github.com/sgl-project/sglang), [vLLM](https://github.com/vllm-project/vllm), [oMLX](https://github.com/jundot/omlx), or [llama.cpp](https://github.com/ggml-org/llama.cpp) separately, launch its OpenAI-compatible server with DFlash, and pass its `--base-url` below.
+For serving benchmarks, install a supported version of [SGLang](https://github.com/sgl-project/sglang/pull/35371), [vLLM](https://github.com/vllm-project/vllm/pull/52816), [oMLX](https://github.com/z-lab/omlx-fork/releases/download/0.6.2-dflash2/oMLX-0.6.2-zlab-dflash2-arm64-signed.dmg), or [llama.cpp](https://github.com/ggml-org/llama.cpp/pull/27342) separately, launch its OpenAI-compatible server with DFlash, and pass its `--base-url` below.
 
 ## 🚀 Quick Start
 
